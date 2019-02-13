@@ -21,15 +21,7 @@ def EdgeInd2PointsInd(edgeInd, obj):
         return polygon.d, polygon.a
 
 # Is an edge placed on UV border?
-def isUVBorder(edgeInd, obj, nbr, polyS, workedPoints):
-    p1, p2 = EdgeInd2PointsInd(edgeInd, obj)
-
-    # If these point were worked, then skit them
-    if {p1, p2} in workedPoints:
-        return False
-
-    workedPoints.append({p1, p2})
-
+def isUVBorder(edgeInd, obj, nbr, polyS):
     polyS.DeselectAll()
     poly1, poly2 = nbr.GetEdgePolys(*EdgeInd2PointsInd(edgeInd, obj))
     polyS.Select(poly1)
@@ -115,16 +107,15 @@ def do(obj):
 
     # @todo May be show AbortContinue dialog?
     if maxEdgeCount > 4000:
-        print "Object has %s *inner* edges. Script may take some time to work. Be patient :)" % maxEdgeCount
+        print "Object `%s` has %s *inner* edges. Script may take some time to work. Be patient :)"\
+              % (obj.GetName(), maxEdgeCount)
 
     UVBorders = set()
     nbr = utils.Neighbor()
     nbr.Init(obj)
     polyS = obj.GetPolygonS()
-    # Only for optimization purpose
-    workedPoints = []
     for edgeInd in range(0, maxEdgeCount):
-        if isUVBorder(edgeInd, obj, nbr, polyS, workedPoints):
+        if isUVBorder(edgeInd, obj, nbr, polyS):
             UVBorders.add(edgeInd)
     nbr.Flush()
 
@@ -141,7 +132,6 @@ def do(obj):
     smoothPhongTag(obj)
 
 def main():
-    print 'asd'
     activeObjs = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_0)
 
     if len(activeObjs) == 0:
