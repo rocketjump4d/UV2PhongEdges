@@ -1,3 +1,6 @@
+# https://github.com/rocketjump4d/UV2PhongEdges
+# author: rocketjump4d
+
 import c4d
 import time
 from c4d import utils
