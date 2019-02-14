@@ -23,11 +23,13 @@ def EdgeInd2PointsInd(edgeInd, obj):
 # Is an edge placed on UV border?
 def isUVBorder(edgeInd, obj, nbr, polyS):
     polyS.DeselectAll()
-    poly1, poly2 = nbr.GetEdgePolys(*EdgeInd2PointsInd(edgeInd, obj))
-    polyS.Select(poly1)
+    polyInd1, polyInd2 = nbr.GetEdgePolys(*EdgeInd2PointsInd(edgeInd, obj))
+    polyS.Select(polyInd1)
 
-    # Object's border
-    if poly2 < 0:
+    # If polygon's index equals -1 then current edge has only 1 polygon
+    # And as a result it's a object's border. I mean, there's nothing else
+    # Only pure void. Object is finished.
+    if polyInd2 < 0:
         return False
 
     ## The lines below are the core of this script. And, I guess it's a performance's bottle neck
@@ -46,7 +48,7 @@ def isUVBorder(edgeInd, obj, nbr, polyS):
         if selected:
             grownPolygonIds.append(index)
 
-    return poly2 not in grownPolygonIds
+    return polyInd2 not in grownPolygonIds
 
 def breakPhongEdges(obj):
     settings = c4d.BaseContainer()
@@ -103,6 +105,16 @@ def do(obj):
         print "Skip %s. Only PolygonObjects are allowed" % obj.GetName()
         return
 
+    if obj.GetTag(c4d.Tuvw) is None:
+        print "Skip %s. It hasn't UVW tag" % obj.GetName()
+        return
+
+    # Save original polygons and edges selection
+    polyS = obj.GetPolygonS()
+    originPolyS = polyS.GetClone()
+    edgeS = obj.GetEdgeS()
+    originalEdgeS = edgeS.GetClone()
+
     maxEdgeCount = obj.GetPolygonCount() * 4
 
     # @todo May be show AbortContinue dialog?
@@ -113,7 +125,6 @@ def do(obj):
     UVBorders = set()
     nbr = utils.Neighbor()
     nbr.Init(obj)
-    polyS = obj.GetPolygonS()
     for edgeInd in range(0, maxEdgeCount):
         if isUVBorder(edgeInd, obj, nbr, polyS):
             UVBorders.add(edgeInd)
@@ -130,6 +141,10 @@ def do(obj):
 
     # Smooth object with Phong tag
     smoothPhongTag(obj)
+
+    # Restore original elements selections
+    polyS.SetAll(originPolyS.GetAll(obj.GetPolygonCount()))
+    edgeS.SetAll(originalEdgeS.GetAll(maxEdgeCount))
 
 def main():
     activeObjs = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_0)
