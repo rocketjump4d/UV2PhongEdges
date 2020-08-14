@@ -1,207 +1,143 @@
+# coding=utf-8
 # https://github.com/rocketjump4d/UV2PhongEdges
 # author: rocketjump4d
 
 import c4d
-import time
 from c4d import utils
 
-class UV2PhongEdges:
-    def __init__(self, doc):
-        self._doc = doc
 
-    def Prepare(self):
-        self.StoreCurrentState()
-        self.OpenTextureView()
+class UV2PhongShading:
+    _abcd = tuple("abcd")
 
-    def StoreCurrentState(self):
-        # Script must works in UVPolygon's mode
-        self._currentDocMode = doc.GetMode()
-        if (self._currentDocMode != c4d.Muvpolygons):
-            doc.SetMode(c4d.Muvpolygons)
+    @classmethod
+    def SelectUVBorders(cls, obj):
+        tuvw = obj.GetTag(c4d.Tuvw)
+        nbr = utils.Neighbor()
+        nbr.Init(obj)
 
-    def RestoreState(self):
-        doc.SetMode(self._currentDocMode)
+        # Create empty set for `edgesVV`
+        # In this case `edgeVV` means `Edge between Vertex0 and Vertex1 (edgeVertexVertex)`
+        # edgeVV is just a tuple(v0, v1), where v0 is index of the first vertex
+        # and v1 is the second one
+        allEdgesVV = set()
 
-    # Get point's indexes for edgeInd
-    def EdgeInd2PointsInd(self, edgeInd, obj):
-        polyInd = int(edgeInd / 4)
-        polyEdgeInd = edgeInd - 4 * polyInd
-        polygon = obj.GetPolygon(polyInd)
+        for i in xrange(obj.GetPointCount()):
+            # Find neighbor vertex for this one
+            neighborIndexes = nbr.GetPointOneRingPoints(i)
 
-        if polyEdgeInd == 0:
-            return polygon.a, polygon.b
-        elif polyEdgeInd == 1:
-            return polygon.b, polygon.c
-        elif polyEdgeInd == 2:
-            return polygon.c, polygon.d
-        elif polyEdgeInd == 3:
-            return polygon.d, polygon.a
+            for ni in neighborIndexes:
+                edgeTuple = (i, ni)
+                allEdgesVV.add(edgeTuple)
 
-    # Is an edge placed on UV border?
-    def IsUVBorder(self, edgeInd, obj, nbr, polyS):
-        polyS.DeselectAll()
-        polyInd1, polyInd2 = nbr.GetEdgePolys(*self.EdgeInd2PointsInd(edgeInd, obj))
-        polyS.Select(polyInd1)
+        # At this point I've got a set of all `edgesVV` of the object
+        # Something like this:
+        # (0, 3)
+        # (0, 5)
+        # (5, 1)
 
-        # If polygon's index equals -1 then current edge has only 1 polygon
-        # And as a result it's a object's border. I mean, there's nothing else
-        # Only pure void. Object is finished.
-        if polyInd2 < 0:
-            return True
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE_SELECTION, obj)
+        obj.GetEdgeS().DeselectAll()
 
-        ## The lines below are the core of this script. And, I guess it's a performance's bottle neck
+        for edgeVV in allEdgesVV:
+            # Find neighbour polygons for this edge
+            # I called them polyA and polyB
+            polyAIndex, polyBIndex = nbr.GetEdgePolys(edgeVV[0], edgeVV[1])
+            polyA = obj.GetPolygon(polyAIndex)
 
-        # Grow selection. Must be in UVPolygon Mode and Texture View must be opened at least once
-        # And obj must be active
-        self._doc.SetActiveObject(obj, c4d.SELECTION_NEW)
+            if polyBIndex is c4d.NOTOK:
+                # There is no polyB. It means that this edge is border of the object
 
-        # `CallCommand` cause undo issue :(
-        c4d.CallCommand(12558, 12558)
+                # eiA stands for `Edge Index in polyA for current edgeVV`
+                eiA = polyAIndex * 4 + polyA.FindEdge(edgeVV[0], edgeVV[1])
+                doc.AddUndo(c4d.UNDOTYPE_CHANGE_SELECTION, obj)
+                # Maybe, it'll be better to replace all Select() with SelectAll() after the loop
+                obj.GetEdgeS().Select(eiA)
+                continue
 
-        # Get all polygon's ids after growing
-        grownPolygonIds = []
-        sel = polyS.GetAll(obj.GetPolygonCount())
-        for index, selected in enumerate(sel):
-            if selected:
-                grownPolygonIds.append(index)
+            polyB = obj.GetPolygon(polyBIndex)
 
-        return polyInd2 not in grownPolygonIds
+            # piA0 stands for `Point Index in polyA for vertex edgeVV[0]`
+            # the same for others
+            piA0 = polyA.Find(edgeVV[0])
+            piA1 = polyA.Find(edgeVV[1])
+            piB0 = polyB.Find(edgeVV[0])
+            piB1 = polyB.Find(edgeVV[1])
 
-    def BreakPhongEdges(self, obj):
+            # Replace "d" (3) to "c" (2) if polygon is triangle
+            if polyA.IsTriangle() and piA0 == 3:
+                piA0 = 2
+            if polyA.IsTriangle() and piA1 == 3:
+                piA1 = 2
+            if polyB.IsTriangle() and piB0 == 3:
+                piB0 = 2
+            if polyB.IsTriangle() and piB1 == 3:
+                piB1 = 2
+
+            # Get UV coordinates for each point in each polygon
+            uvCoordA0 = tuvw.GetSlow(polyAIndex)[cls._abcd[piA0]]
+            uvCoordA1 = tuvw.GetSlow(polyAIndex)[cls._abcd[piA1]]
+            uvCoordB0 = tuvw.GetSlow(polyBIndex)[cls._abcd[piB0]]
+            uvCoordB1 = tuvw.GetSlow(polyBIndex)[cls._abcd[piB1]]
+
+            if uvCoordA0 != uvCoordB0 or uvCoordA1 != uvCoordB1:
+                eiA = polyAIndex * 4 + polyA.FindEdge(edgeVV[0], edgeVV[1])
+                eiB = polyBIndex * 4 + polyB.FindEdge(edgeVV[0], edgeVV[1])
+                doc.AddUndo(c4d.UNDOTYPE_CHANGE_SELECTION, obj)
+                doc.AddUndo(c4d.UNDOTYPE_CHANGE_SELECTION, obj)
+                # Maybe, it'll be better to replace all Select() with SelectAll() after the loop
+                obj.GetEdgeS().Select(eiA)
+                obj.GetEdgeS().Select(eiB)
+
+    @classmethod
+    def BreakShading(cls, obj):
+        # Save original selected edges
+        originalEdgeS = obj.GetEdgeS().GetClone()
+
+        # Smooth (unbreak) all edges
         settings = c4d.BaseContainer()
-
-        # First step. Unbreak all edges
-        self._doc.AddUndo(c4d.UNDOTYPE_CHANGE_NOCHILDREN, obj)
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE_NOCHILDREN, obj)
         utils.SendModelingCommand(c4d.MCOMMAND_UNBREAKPHONG,
                                   [obj],
                                   c4d.MODELINGCOMMANDMODE_ALL,
                                   settings,
-                                  self._doc)
+                                  doc)
 
-        # Second. Break Phong shading based on selected edges
-        self._doc.AddUndo(c4d.UNDOTYPE_CHANGE_NOCHILDREN, obj)
+        cls.SelectUVBorders(obj)
+
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE_NOCHILDREN, obj)
         utils.SendModelingCommand(c4d.MCOMMAND_BREAKPHONG,
                                   [obj],
                                   c4d.MODELINGCOMMANDMODE_EDGESELECTION,
                                   settings,
-                                  self._doc)
+                                  doc)
 
-    # Add/edit Phong tag to represent smooth result
-    # Important PHONGTAG_PHONG_USEEDGES must be True
-    def SmoothPhongTag(self, obj):
-        phongTag = obj.GetTag(c4d.Tphong)
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE_SELECTION, obj)
 
-        # If Phong ag doesn't exist then create new
-        if phongTag is None:
-            self._doc.AddUndo(c4d.UNDOTYPE_NEW, obj)
-            phongTag = obj.MakeTag(c4d.Tphong)
+        # Restore original selected edges
+        originalEdgeS.CopyTo(obj.GetEdgeS())
 
-        # Set parameters
-        self._doc.AddUndo(c4d.UNDOTYPE_CHANGE_NOCHILDREN, phongTag)
-        phongTag[c4d.PHONGTAG_PHONG_ANGLELIMIT] = True
-        phongTag[c4d.PHONGTAG_PHONG_ANGLE] = 180
-        phongTag[c4d.PHONGTAG_PHONG_USEEDGES] = True
-
-    # Just open `Texture View` window
-    def OpenTextureView(self):
-        c4d.CallCommand(170103)  # New Texture View...
-
-    def Do(self, obj):
-        if not obj.IsInstanceOf(c4d.Opolygon):
-            print "Skip %s. Only PolygonObjects are allowed" % obj.GetName()
-            return
-
-        if obj.GetTag(c4d.Tuvw) is None:
-            print "Skip %s. It hasn't UVW tag" % obj.GetName()
-            return
-
-        # Save original polygons and edges selection
-        polyS = obj.GetPolygonS()
-        originPolyS = polyS.GetClone()
-        edgeS = obj.GetEdgeS()
-        originalEdgeS = edgeS.GetClone()
-
-        maxEdgeCount = obj.GetPolygonCount() * 4
-
-        # @todo May be show AbortContinue dialog?
-        if maxEdgeCount > 4000:
-            print "Object `%s` has %s *inner* edges. Script may take some time to work. Be patient :)" \
-                  % (obj.GetName(), maxEdgeCount)
-
-        UVBorders = set()
-        nbr = utils.Neighbor()
-        nbr.Init(obj)
-        for edgeInd in range(0, maxEdgeCount):
-            if self.IsUVBorder(edgeInd, obj, nbr, polyS):
-                UVBorders.add(edgeInd)
-        nbr.Flush()
-
-        edges = obj.GetEdgeS()
-        self._doc.AddUndo(c4d.UNDOTYPE_CHANGE_SELECTION, obj)
-        edges.DeselectAll()
-        for edgeInd in UVBorders:
-            edges.Select(edgeInd)
-
-        # Phong Break for selected edges
-        self.BreakPhongEdges(obj)
-
-        # Smooth object with Phong tag
-        self.SmoothPhongTag(obj)
-
-        # Restore original elements selections
-        polyS.SetAll(originPolyS.GetAll(obj.GetPolygonCount()))
-        edgeS.SetAll(originalEdgeS.GetAll(maxEdgeCount))
-
-def getChildren(obj, data=None):
-    if not data:
-        data = list()
-
-    data.append(obj)
-    children = obj.GetChildren()
-    for child in children:
-        getChildren(child, data)
-
-    return data
 
 def main():
-    global doc
-
-    activeObjs = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_0)
-
-    if len(activeObjs) == 0:
-        print "Nothing selected"
+    objs = doc.GetActiveObjects(0)
+    if not objs:
+        print("UV2PhongShading: Nothing selected")
         return
 
-    startTime = time.clock()
-
-    ## Preparation ##
     doc.StartUndo()
+    for obj in objs:
+        if not obj.IsInstanceOf(c4d.Opolygon):
+            print("UV2PhongShading: `%s` is not an instance of c4d.PolygonObject" % obj.GetName())
+            continue
 
-        # Must be opened at least once per session.
-    # @todo Call this func only once, but not each time script is used
-    # Find a way to store variable during current session
-    uv2phong = UV2PhongEdges(doc)
-    uv2phong.Prepare()
+        if obj.GetTag(c4d.Tuvw) is None:
+            print("UV2PhongShading: `%s` hasn't UVW tag" % obj.GetName())
+            continue
 
-    uv2phong.StoreCurrentState()
-    uv2phong.OpenTextureView()
-    
-    ## Main loop ##
-    for obj in activeObjs:
-        map(uv2phong.Do, getChildren(obj))
-
-    ## Finishing ##
-    uv2phong.RestoreState()
-
-    # Restore selected object
-    for i, obj in enumerate(activeObjs):
-        doc.SetActiveObject(obj, c4d.SELECTION_NEW if i == 0 else c4d.SELECTION_ADD)
-
+        UV2PhongShading().BreakShading(obj)
 
     doc.EndUndo()
-    endTime = time.clock()
-    print "UV2PhongEdges. Elapsed Time: %s sec" % (endTime - startTime)
     c4d.EventAdd()
 
 if __name__=='__main__':
     main()
+
