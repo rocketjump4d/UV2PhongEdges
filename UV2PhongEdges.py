@@ -21,7 +21,7 @@ class UV2PhongShading:
         # and v1 is the second one
         allEdgesVV = set()
 
-        for i in xrange(obj.GetPointCount()):
+        for i in range(obj.GetPointCount()):
             # Find neighbor vertex for this one
             neighborIndexes = nbr.GetPointOneRingPoints(i)
 
