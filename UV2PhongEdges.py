@@ -26,6 +26,8 @@ class UV2PhongShading:
             neighborIndexes = nbr.GetPointOneRingPoints(i)
 
             for ni in neighborIndexes:
+                if i == ni:
+                    continue
                 edgeTuple = (i, ni)
                 allEdgesVV.add(edgeTuple)
 
